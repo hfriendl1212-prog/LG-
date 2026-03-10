@@ -14,7 +14,6 @@ API_ENDPOINT = f"{API_URL}/api/admin/games/bulk-upload"
 BLOCKED_OPPONENTS = ["한화"]
 KBO_URL = "https://www.koreabaseball.com/Schedule/Schedule.aspx"
 
-# 크롤링할 월 범위 (KBO 정규시즌 3월~10월)
 SEASON_MONTHS = ["03", "04", "05", "06", "07", "08", "09", "10"]
 
 def get_driver():
@@ -54,7 +53,6 @@ def parse_teams(team_str):
     return None, None
 
 def crawl_month(driver, year_str, month_str):
-    """드라이버 재사용하며 월별 크롤링"""
     games = []
     try:
         driver.get(KBO_URL)
@@ -108,6 +106,13 @@ def crawl_month(driver, year_str, month_str):
                 "home": home_team,
                 "stadium": stadium
             })
+
+        # 6월 디버깅: LG/두산 관련 경기 출력
+        if month_str == "06":
+            print(f"  [06월 LG·두산 관련 경기 전체]")
+            for g in games:
+                if "LG" in g["away"] or "LG" in g["home"] or "두산" in g["away"] or "두산" in g["home"]:
+                    print(f"    {g['date']} {g['away']}vs{g['home']} @ {g['stadium']}")
 
     except Exception as e:
         print(f"  [{month_str}월] 크롤링 오류: {e}")
@@ -181,7 +186,6 @@ def main():
     print(f"   API: {API_ENDPOINT}")
     print(f"   대상 월: {SEASON_MONTHS}")
 
-    # 드라이버 한 번만 열고 전 월을 순회
     driver = get_driver()
     all_games = []
     try:
