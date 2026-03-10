@@ -14,6 +14,9 @@ API_ENDPOINT = f"{API_URL}/api/admin/games/bulk-upload"
 BLOCKED_OPPONENTS = ["한화"]
 KBO_URL = "https://www.koreabaseball.com/Schedule/Schedule.aspx"
 
+# 크롤링할 월 범위 (KBO 정규시즌 3월~10월)
+SEASON_MONTHS = ["03", "04", "05", "06", "07", "08", "09", "10"]
+
 def get_driver():
     options = Options()
     options.add_argument("--headless")
@@ -45,33 +48,26 @@ def get_game_time(game_date_str):
     return "14:00" if d.weekday() in (5, 6) else "18:30"
 
 def parse_teams(team_str):
-    """
-    'KIAvsLG' → away='KIA', home='LG'
-    'vs' 기준으로 분리, 뒤쪽이 홈팀
-    """
     m = re.match(r'(.+?)vs(.+)', team_str, re.IGNORECASE)
     if m:
         return m.group(1).strip(), m.group(2).strip()
     return None, None
 
-def crawl_month(year_str, month_str):
-    driver = get_driver()
+def crawl_month(driver, year_str, month_str):
+    """드라이버 재사용하며 월별 크롤링"""
     games = []
     try:
         driver.get(KBO_URL)
         wait = WebDriverWait(driver, 15)
 
-        # 연도 선택
         year_sel = Select(wait.until(EC.presence_of_element_located((By.ID, "ddlYear"))))
         year_sel.select_by_value(year_str)
         time.sleep(1)
 
-        # 월 선택
         month_sel = Select(driver.find_element(By.ID, "ddlMonth"))
         month_sel.select_by_value(month_str)
         time.sleep(1)
 
-        # KBO 정규시즌 일정 선택
         series_sel = Select(driver.find_element(By.ID, "ddlSeries"))
         try:
             series_sel.select_by_visible_text("KBO 정규시즌 일정")
@@ -81,7 +77,6 @@ def crawl_month(year_str, month_str):
 
         table = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "tbl-type06")))
         rows = table.find_elements(By.TAG_NAME, "tr")
-        print(f"  총 행 수: {len(rows)}")
 
         current_date = None
         for row in rows:
@@ -90,17 +85,12 @@ def crawl_month(year_str, month_str):
                 continue
             text_list = [c.text.strip() for c in cols]
 
-            # 날짜 감지: '04.01(수)' 형태
             date_match = re.match(r'(\d{2})\.(\d{2})\(.+\)', text_list[0])
             if date_match:
                 mm, dd = date_match.group(1), date_match.group(2)
                 current_date = f"{year_str}-{mm}-{dd}"
 
-            if current_date is None:
-                continue
-
-            # 경기 데이터 행: text_list[2]에 'XXXvsYYY' 패턴 존재
-            if len(text_list) < 8:
+            if current_date is None or len(text_list) < 8:
                 continue
 
             team_str = text_list[2]
@@ -111,8 +101,7 @@ def crawl_month(year_str, month_str):
             if not away_team or not home_team:
                 continue
 
-            stadium = text_list[7]  # 구장은 index 7
-
+            stadium = text_list[7]
             games.append({
                 "date": current_date,
                 "away": away_team,
@@ -120,23 +109,15 @@ def crawl_month(year_str, month_str):
                 "stadium": stadium
             })
 
-        print(f"  KBO 크롤링 완료: {len(games)}경기 수집")
-
     except Exception as e:
-        print(f"  크롤링 오류: {e}")
-    finally:
-        driver.quit()
+        print(f"  [{month_str}월] 크롤링 오류: {e}")
+
+    print(f"  [{month_str}월] {len(games)}경기 수집")
     return games
 
-def filter_jamsil_home(games, target_month_int):
+def filter_jamsil_home(games):
     result = []
     for g in games:
-        try:
-            if datetime.strptime(g["date"], "%Y-%m-%d").month != target_month_int:
-                continue
-        except:
-            continue
-
         if "잠실" not in g["stadium"]:
             continue
 
@@ -195,21 +176,24 @@ def upload(rows):
         print(f"❌ 업로드 실패: {e}")
 
 def main():
-    now = datetime.now()
-    if now.month == 12:
-        target_year, target_month = now.year + 1, 1
-    else:
-        target_year, target_month = now.year, now.month + 1
-
-    year_str  = str(target_year)
-    month_str = str(target_month).zfill(2)
-
-    print(f"🔄 {target_year}년 {target_month}월 KBO 공홈 크롤링 시작")
+    year_str = str(datetime.now().year)
+    print(f"🔄 {year_str}년 시즌 전체 KBO 크롤링 시작")
     print(f"   API: {API_ENDPOINT}")
+    print(f"   대상 월: {SEASON_MONTHS}")
 
-    all_games = crawl_month(year_str, month_str)
-    rows = filter_jamsil_home(all_games, target_month)
-    print(f"잠실 홈 경기 (LG+두산): {len(rows)}경기")
+    # 드라이버 한 번만 열고 전 월을 순회
+    driver = get_driver()
+    all_games = []
+    try:
+        for month_str in SEASON_MONTHS:
+            games = crawl_month(driver, year_str, month_str)
+            all_games.extend(games)
+            time.sleep(1)
+    finally:
+        driver.quit()
+
+    rows = filter_jamsil_home(all_games)
+    print(f"\n전체 잠실 홈 경기 (LG+두산): {len(rows)}경기")
     upload(rows)
 
 if __name__ == "__main__":
