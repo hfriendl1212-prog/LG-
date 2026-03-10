@@ -65,7 +65,7 @@ def crawl_month(year_str, month_str):
         # KBO 정규시즌 선택 - 텍스트 기준으로 선택
         series_sel = Select(driver.find_element(By.ID, "ddlSeries"))
         try:
-            series_sel.select_by_visible_text("KBO 정규시즌")
+            series_sel.select_by_visible_text("KBO 정규시즌 일정")
         except:
             try:
                 series_sel.select_by_index(0)
