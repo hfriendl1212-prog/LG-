@@ -62,10 +62,20 @@ def crawl_month(year_str, month_str):
         month_sel.select_by_value(month_str)
         time.sleep(1)
 
-        # KBO 정규시즌 선택 (value=0)
+        # KBO 정규시즌 선택 - 텍스트 기준으로 선택
         series_sel = Select(driver.find_element(By.ID, "ddlSeries"))
-        series_sel.select_by_value("0")
+        try:
+            series_sel.select_by_visible_text("KBO 정규시즌")
+        except:
+            try:
+                series_sel.select_by_index(0)
+            except:
+                pass
         time.sleep(2)
+
+        # 옵션 목록 디버깅 출력
+        all_options = series_sel.options
+        print(f"  시리즈 옵션 목록: {[o.text for o in all_options]}")
 
         table = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "tbl-type06")))
         rows = table.find_elements(By.TAG_NAME, "tr")
@@ -86,7 +96,6 @@ def crawl_month(year_str, month_str):
             if current_date is None or len(text_list) < 5:
                 continue
 
-            # 경기 없는 행 스킵 ("경기 없음" 등)
             if "경기 없음" in " ".join(text_list) or text_list[1] == "":
                 continue
 
@@ -103,6 +112,7 @@ def crawl_month(year_str, month_str):
                 })
 
         print(f"  KBO 크롤링 완료: {len(games)}경기 수집")
+
     except Exception as e:
         print(f"  크롤링 오류: {e}")
     finally:
