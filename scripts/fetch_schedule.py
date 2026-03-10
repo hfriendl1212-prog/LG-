@@ -1,5 +1,4 @@
 import os, re, calendar, requests, time
-import pandas as pd
 from datetime import datetime, date, timedelta
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -62,23 +61,30 @@ def crawl_month(year_str, month_str):
         month_sel.select_by_value(month_str)
         time.sleep(1)
 
-        # KBO 정규시즌 선택 - 텍스트 기준으로 선택
+        # KBO 정규시즌 일정 선택
         series_sel = Select(driver.find_element(By.ID, "ddlSeries"))
         try:
             series_sel.select_by_visible_text("KBO 정규시즌 일정")
         except:
             try:
-                series_sel.select_by_index(0)
+                series_sel.select_by_index(1)
             except:
                 pass
         time.sleep(2)
 
-        # 옵션 목록 디버깅 출력
+        # 시리즈 옵션 디버깅
         all_options = series_sel.options
         print(f"  시리즈 옵션 목록: {[o.text for o in all_options]}")
 
         table = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "tbl-type06")))
         rows = table.find_elements(By.TAG_NAME, "tr")
+
+        # 디버깅: 첫 5행 raw 출력
+        print(f"  총 행 수: {len(rows)}")
+        for i, row in enumerate(rows[:5]):
+            cols = row.find_elements(By.TAG_NAME, "td")
+            text_list = [c.text.strip() for c in cols]
+            print(f"  row[{i}]: {text_list}")
 
         current_date = None
         for row in rows:
