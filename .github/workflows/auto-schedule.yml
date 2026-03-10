@@ -2,7 +2,7 @@ name: 월별 KBO 경기 자동 업데이트
 
 on:
   schedule:
-    - cron: '0 0 1 * *'
+    - cron: '0 18 * * *'
   workflow_dispatch:
 
 jobs:
