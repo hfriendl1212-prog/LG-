@@ -107,13 +107,6 @@ def crawl_month(driver, year_str, month_str):
                 "stadium": stadium
             })
 
-        # 6월 디버깅: LG/두산 관련 경기 출력
-        if month_str == "06":
-            print(f"  [06월 LG·두산 관련 경기 전체]")
-            for g in games:
-                if "LG" in g["away"] or "LG" in g["home"] or "두산" in g["away"] or "두산" in g["home"]:
-                    print(f"    {g['date']} {g['away']}vs{g['home']} @ {g['stadium']}")
-
     except Exception as e:
         print(f"  [{month_str}월] 크롤링 오류: {e}")
 
@@ -135,8 +128,9 @@ def filter_jamsil_home(games):
             continue
 
         opponent = g["away"]
-# 두산 홈 한화전만 차단, LG는 한화전 포함 전부 오픈
-is_blocked = 1 if (team == "두산" and any(b in opponent for b in BLOCKED_OPPONENTS)) else 0
+
+        # 두산 홈 한화전만 차단, LG는 한화전 포함 전부 오픈
+        is_blocked = 1 if (team == "두산" and any(b in opponent for b in BLOCKED_OPPONENTS)) else 0
 
         draw_start, draw_end = get_draw_period(g["date"])
 
