@@ -44,6 +44,16 @@ def get_game_time(game_date_str):
     d = datetime.strptime(game_date_str, "%Y-%m-%d").date()
     return "14:00" if d.weekday() in (5, 6) else "18:30"
 
+def parse_teams(team_str):
+    """
+    'KIAvsLG' → away='KIA', home='LG'
+    'vs' 기준으로 분리, 뒤쪽이 홈팀
+    """
+    m = re.match(r'(.+?)vs(.+)', team_str, re.IGNORECASE)
+    if m:
+        return m.group(1).strip(), m.group(2).strip()
+    return None, None
+
 def crawl_month(year_str, month_str):
     driver = get_driver()
     games = []
@@ -66,25 +76,12 @@ def crawl_month(year_str, month_str):
         try:
             series_sel.select_by_visible_text("KBO 정규시즌 일정")
         except:
-            try:
-                series_sel.select_by_index(1)
-            except:
-                pass
+            series_sel.select_by_index(1)
         time.sleep(2)
-
-        # 시리즈 옵션 디버깅
-        all_options = series_sel.options
-        print(f"  시리즈 옵션 목록: {[o.text for o in all_options]}")
 
         table = wait.until(EC.presence_of_element_located((By.CLASS_NAME, "tbl-type06")))
         rows = table.find_elements(By.TAG_NAME, "tr")
-
-        # 디버깅: 첫 5행 raw 출력
         print(f"  총 행 수: {len(rows)}")
-        for i, row in enumerate(rows[:5]):
-            cols = row.find_elements(By.TAG_NAME, "td")
-            text_list = [c.text.strip() for c in cols]
-            print(f"  row[{i}]: {text_list}")
 
         current_date = None
         for row in rows:
@@ -93,29 +90,35 @@ def crawl_month(year_str, month_str):
                 continue
             text_list = [c.text.strip() for c in cols]
 
-            # 날짜 셀 감지 (예: "03.28(토)")
+            # 날짜 감지: '04.01(수)' 형태
             date_match = re.match(r'(\d{2})\.(\d{2})\(.+\)', text_list[0])
             if date_match:
                 mm, dd = date_match.group(1), date_match.group(2)
                 current_date = f"{year_str}-{mm}-{dd}"
 
-            if current_date is None or len(text_list) < 5:
+            if current_date is None:
                 continue
 
-            if "경기 없음" in " ".join(text_list) or text_list[1] == "":
+            # 경기 데이터 행: text_list[2]에 'XXXvsYYY' 패턴 존재
+            if len(text_list) < 8:
                 continue
 
-            away_team = text_list[2] if len(text_list) > 2 else ""
-            home_team = text_list[4] if len(text_list) > 4 else ""
-            stadium   = text_list[6] if len(text_list) > 6 else ""
+            team_str = text_list[2]
+            if "vs" not in team_str.lower():
+                continue
 
-            if away_team and home_team:
-                games.append({
-                    "date": current_date,
-                    "away": away_team,
-                    "home": home_team,
-                    "stadium": stadium
-                })
+            away_team, home_team = parse_teams(team_str)
+            if not away_team or not home_team:
+                continue
+
+            stadium = text_list[7]  # 구장은 index 7
+
+            games.append({
+                "date": current_date,
+                "away": away_team,
+                "home": home_team,
+                "stadium": stadium
+            })
 
         print(f"  KBO 크롤링 완료: {len(games)}경기 수집")
 
