@@ -135,7 +135,9 @@ def filter_jamsil_home(games):
             continue
 
         opponent = g["away"]
-        is_blocked = 1 if any(b in opponent for b in BLOCKED_OPPONENTS) else 0
+# 두산 홈 한화전만 차단, LG는 한화전 포함 전부 오픈
+is_blocked = 1 if (team == "두산" and any(b in opponent for b in BLOCKED_OPPONENTS)) else 0
+
         draw_start, draw_end = get_draw_period(g["date"])
 
         result.append({
