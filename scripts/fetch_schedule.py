@@ -13,7 +13,6 @@ API_URL = os.getenv("API_URL", "https://lg-twins-lottery.pages.dev")
 API_ENDPOINT = f"{API_URL}/api/admin/games/bulk-upload"
 BLOCKED_OPPONENTS = ["한화"]
 KBO_URL = "https://www.koreabaseball.com/Schedule/Schedule.aspx"
-
 SEASON_MONTHS = ["03", "04", "05", "06", "07", "08", "09", "10"]
 
 def get_driver():
@@ -78,7 +77,6 @@ def crawl_month(driver, year_str, month_str):
 
         current_date = None
         for row in rows:
-            # ✅ th 태그에서 날짜 먼저 확인 (날짜는 th로 감싸진 경우도 있음)
             ths = row.find_elements(By.TAG_NAME, "th")
             for th in ths:
                 th_text = th.text.strip()
@@ -93,7 +91,6 @@ def crawl_month(driver, year_str, month_str):
 
             text_list = [c.text.strip() for c in cols]
 
-            # ✅ td에서도 날짜 확인 (기존 로직 유지)
             if text_list:
                 date_match = re.match(r'(\d{2})\.(\d{2})\(.+\)', text_list[0])
                 if date_match:
@@ -103,7 +100,6 @@ def crawl_month(driver, year_str, month_str):
             if current_date is None:
                 continue
 
-            # ✅ vs가 포함된 컬럼 찾기 (인덱스 고정 말고 순회)
             team_str = None
             for cell_text in text_list:
                 if 'vs' in cell_text.lower():
@@ -117,27 +113,38 @@ def crawl_month(driver, year_str, month_str):
             if not away_team or not home_team:
                 continue
 
-            # ✅ 구장 정보: vs가 있는 셀 이후 마지막 셀에서 찾기
             stadium = text_list[-1] if len(text_list) > 1 else ""
-
-            # ✅ 구장이 비어있거나 너무 짧으면 전체 셀에서 잠실 포함 여부 확인
             if not stadium or len(stadium) < 2:
                 for cell_text in text_list:
                     if '잠실' in cell_text or '구장' in cell_text:
                         stadium = cell_text
                         break
 
+            # ✅ 취소 감지: 비고란에 취소 관련 텍스트 또는 스코어 없음
+            is_cancelled = False
+            for cell_text in text_list:
+                if any(kw in cell_text for kw in ["취소", "우천", "그라운드사정", "강우", "콜드"]):
+                    is_cancelled = True
+                    break
+
+            # ✅ 스코어 감지: "숫자:숫자" 패턴이 없고 날짜가 오늘 이전이면 취소로 간주
+            score_found = any(re.search(r'\d+:\d+', cell_text) for cell_text in text_list)
+            game_date_obj = datetime.strptime(current_date, "%Y-%m-%d").date()
+            if not score_found and game_date_obj < date.today() and not is_cancelled:
+                # 과거 경기인데 스코어도 없고 취소 표기도 없으면 일단 그냥 진행
+                pass
+
             games.append({
                 "date": current_date,
                 "away": away_team,
                 "home": home_team,
-                "stadium": stadium
+                "stadium": stadium,
+                "is_cancelled": is_cancelled
             })
 
     except Exception as e:
         print(f"  [{month_str}월] 크롤링 오류: {e}")
 
-    # ✅ 중복 제거 (같은 날짜+팀 조합 중복 방지)
     seen = set()
     unique_games = []
     for g in games:
@@ -146,7 +153,8 @@ def crawl_month(driver, year_str, month_str):
             seen.add(key)
             unique_games.append(g)
 
-    print(f"  [{month_str}월] {len(unique_games)}경기 수집")
+    cancelled_count = sum(1 for g in unique_games if g["is_cancelled"])
+    print(f"  [{month_str}월] {len(unique_games)}경기 수집 (취소 감지: {cancelled_count}건)")
     return unique_games
 
 def filter_jamsil_home(games):
@@ -164,11 +172,11 @@ def filter_jamsil_home(games):
             continue
 
         opponent = g["away"]
-
-        # 두산 홈 한화전만 차단, LG는 한화전 포함 전부 오픈
         is_blocked = 1 if (team == "두산" and any(b in opponent for b in BLOCKED_OPPONENTS)) else 0
-
         draw_start, draw_end = get_draw_period(g["date"])
+
+        # ✅ 취소된 경기는 status를 cancelled로 세팅
+        status = "cancelled" if g.get("is_cancelled") else "pending"
 
         result.append({
             "game_date": g["date"],
@@ -178,8 +186,10 @@ def filter_jamsil_home(games):
             "stadium": "잠실야구장",
             "draw_start_date": draw_start,
             "draw_end_date": draw_end,
-            "status": "pending",
-            "is_blocked": is_blocked
+            "status": status,
+            "is_blocked": is_blocked,
+            # ✅ 신규/취소 여부를 API에 전달
+            "is_cancelled": 1 if g.get("is_cancelled") else 0
         })
     return result
 
@@ -187,8 +197,8 @@ def upload(rows):
     if not rows:
         print("업로드할 데이터 없음")
         return
-    cols = ["game_date","game_time","opponent_team","team","stadium",
-            "draw_start_date","draw_end_date","status","is_blocked"]
+    cols = ["game_date", "game_time", "opponent_team", "team", "stadium",
+            "draw_start_date", "draw_end_date", "status", "is_blocked", "is_cancelled"]
     lines = [",".join(cols)]
     for r in rows:
         lines.append(",".join(str(r[c]) for c in cols))
@@ -206,7 +216,7 @@ def upload(rows):
             timeout=30
         )
         result = resp.json()
-        print(f"✅ 완료: inserted={result.get('inserted',0)}, updated={result.get('updated',0)}")
+        print(f"✅ 완료: inserted={result.get('inserted', 0)}, updated={result.get('updated', 0)}, cancelled={result.get('cancelled', 0)}")
         if result.get("validation_errors"):
             print(f"⚠️ 검증 오류: {result['validation_errors'][:3]}")
         if result.get("insert_errors"):
