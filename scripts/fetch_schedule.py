@@ -78,28 +78,55 @@ def crawl_month(driver, year_str, month_str):
 
         current_date = None
         for row in rows:
+            # ✅ th 태그에서 날짜 먼저 확인 (날짜는 th로 감싸진 경우도 있음)
+            ths = row.find_elements(By.TAG_NAME, "th")
+            for th in ths:
+                th_text = th.text.strip()
+                date_match = re.match(r'(\d{2})\.(\d{2})\(.+\)', th_text)
+                if date_match:
+                    mm, dd = date_match.group(1), date_match.group(2)
+                    current_date = f"{year_str}-{mm}-{dd}"
+
             cols = row.find_elements(By.TAG_NAME, "td")
             if not cols:
                 continue
+
             text_list = [c.text.strip() for c in cols]
 
-            date_match = re.match(r'(\d{2})\.(\d{2})\(.+\)', text_list[0])
-            if date_match:
-                mm, dd = date_match.group(1), date_match.group(2)
-                current_date = f"{year_str}-{mm}-{dd}"
+            # ✅ td에서도 날짜 확인 (기존 로직 유지)
+            if text_list:
+                date_match = re.match(r'(\d{2})\.(\d{2})\(.+\)', text_list[0])
+                if date_match:
+                    mm, dd = date_match.group(1), date_match.group(2)
+                    current_date = f"{year_str}-{mm}-{dd}"
 
-            if current_date is None or len(text_list) < 8:
+            if current_date is None:
                 continue
 
-            team_str = text_list[2]
-            if "vs" not in team_str.lower():
+            # ✅ vs가 포함된 컬럼 찾기 (인덱스 고정 말고 순회)
+            team_str = None
+            for cell_text in text_list:
+                if 'vs' in cell_text.lower():
+                    team_str = cell_text
+                    break
+
+            if not team_str:
                 continue
 
             away_team, home_team = parse_teams(team_str)
             if not away_team or not home_team:
                 continue
 
-            stadium = text_list[7]
+            # ✅ 구장 정보: vs가 있는 셀 이후 마지막 셀에서 찾기
+            stadium = text_list[-1] if len(text_list) > 1 else ""
+
+            # ✅ 구장이 비어있거나 너무 짧으면 전체 셀에서 잠실 포함 여부 확인
+            if not stadium or len(stadium) < 2:
+                for cell_text in text_list:
+                    if '잠실' in cell_text or '구장' in cell_text:
+                        stadium = cell_text
+                        break
+
             games.append({
                 "date": current_date,
                 "away": away_team,
@@ -110,8 +137,17 @@ def crawl_month(driver, year_str, month_str):
     except Exception as e:
         print(f"  [{month_str}월] 크롤링 오류: {e}")
 
-    print(f"  [{month_str}월] {len(games)}경기 수집")
-    return games
+    # ✅ 중복 제거 (같은 날짜+팀 조합 중복 방지)
+    seen = set()
+    unique_games = []
+    for g in games:
+        key = (g["date"], g["away"], g["home"])
+        if key not in seen:
+            seen.add(key)
+            unique_games.append(g)
+
+    print(f"  [{month_str}월] {len(unique_games)}경기 수집")
+    return unique_games
 
 def filter_jamsil_home(games):
     result = []
@@ -172,7 +208,9 @@ def upload(rows):
         result = resp.json()
         print(f"✅ 완료: inserted={result.get('inserted',0)}, updated={result.get('updated',0)}")
         if result.get("validation_errors"):
-            print(f"⚠️ 오류: {result['validation_errors'][:3]}")
+            print(f"⚠️ 검증 오류: {result['validation_errors'][:3]}")
+        if result.get("insert_errors"):
+            print(f"❌ 저장 오류: {result['insert_errors'][:3]}")
     except Exception as e:
         print(f"❌ 업로드 실패: {e}")
 
