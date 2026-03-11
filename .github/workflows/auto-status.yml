@@ -1,0 +1,27 @@
+name: 추첨 상태 자동 전환
+
+on:
+  schedule:
+    - cron: '5 15 * * *'   # KST 00:05
+    - cron: '5 0 * * *'    # KST 09:05
+  workflow_dispatch:
+
+jobs:
+  auto-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 추첨 상태 자동 전환
+        run: |
+          RESPONSE=$(curl -s -X POST "${{ secrets.API_URL }}/api/admin/auto-status" \
+            -H "Content-Type: application/json")
+          echo "응답: $RESPONSE"
+          
+          SUCCESS=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('success','false'))")
+          if [ "$SUCCESS" != "True" ]; then
+            echo "❌ 상태 전환 실패"
+            exit 1
+          fi
+          
+          OPENED=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('opened',0))")
+          CLOSED=$(echo $RESPONSE | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('closed',0))")
+          echo "✅ 완료: ${OPENED}경기 open, ${CLOSED}경기 closed"
